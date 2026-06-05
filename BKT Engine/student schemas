@@ -1,0 +1,29 @@
+from pydantic import BaseModel
+from typing import Optional, List
+import uuid
+
+
+class MasteryOut(BaseModel):
+    topic_id: str
+    p_mastery: float
+    attempts: int
+    correct_count: int
+
+    class Config:
+        from_attributes = True
+
+
+class StudentProfile(BaseModel):
+    id: uuid.UUID
+    email: str
+    full_name: str
+    grade_level: Optional[str]
+    masteries: List[MasteryOut] = []
+
+    class Config:
+        from_attributes = True
+
+
+class StudentUpdate(BaseModel):
+    full_name: Optional[str] = None
+    grade_level: Optional[str] = None
