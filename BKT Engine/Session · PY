@@ -1,0 +1,20 @@
+from sqlalchemy import Column, String, Integer, Float, ForeignKey, DateTime, JSON, func
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
+import uuid
+from db.database import Base
+
+
+class StudySession(Base):
+    __tablename__ = "study_sessions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    student_id = Column(UUID(as_uuid=True), ForeignKey("students.id"), nullable=False, index=True)
+    topic_id = Column(String, nullable=False, index=True)
+    question_id = Column(String, nullable=True)
+    correct = Column(Integer, nullable=True)  # 1 = correct, 0 = incorrect
+    time_spent_seconds = Column(Integer, nullable=True)
+    response_data = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    student = relationship("Student", back_populates="sessions")
