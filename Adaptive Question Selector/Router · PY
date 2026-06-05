@@ -1,0 +1,67 @@
+from fastapi import APIRouter
+from pydantic import BaseModel
+from typing import List
+from engine import BKTEngine
+
+router = APIRouter(prefix="/bkt")
+
+
+class UpdateRequest(BaseModel):
+    p_mastery: float
+    correct: int  # 1 or 0
+    p_transit: float = 0.1
+    p_slip: float = 0.1
+    p_guess: float = 0.2
+
+
+class UpdateResponse(BaseModel):
+    p_mastery: float
+    p_correct_prediction: float
+
+
+class BulkUpdateRequest(BaseModel):
+    p_mastery: float
+    responses: List[int]
+    p_transit: float = 0.1
+    p_slip: float = 0.1
+    p_guess: float = 0.2
+
+
+class BulkUpdateResponse(BaseModel):
+    trajectory: List[float]
+    final_p_mastery: float
+    is_mastered: bool
+
+
+@router.post("/update", response_model=UpdateResponse)
+async def update_mastery(body: UpdateRequest):
+    engine = BKTEngine(
+        p_transit=body.p_transit,
+        p_slip=body.p_slip,
+        p_guess=body.p_guess,
+    )
+    new_p = engine.update(body.p_mastery, body.correct)
+    p_correct = engine.predict_correct(new_p)
+    return UpdateResponse(p_mastery=new_p, p_correct_prediction=p_correct)
+
+
+@router.post("/bulk-update", response_model=BulkUpdateResponse)
+async def bulk_update(body: BulkUpdateRequest):
+    engine = BKTEngine(
+        p_transit=body.p_transit,
+        p_slip=body.p_slip,
+        p_guess=body.p_guess,
+    )
+    trajectory = engine.bulk_update(body.p_mastery, body.responses)
+    final_p = trajectory[-1]
+    return BulkUpdateResponse(
+        trajectory=trajectory,
+        final_p_mastery=final_p,
+        is_mastered=engine.is_mastered(final_p),
+    )
+
+
+@router.get("/predict")
+async def predict_correct(p_mastery: float, p_slip: float = 0.1, p_guess: float = 0.2):
+    engine = BKTEngine(p_slip=p_slip, p_guess=p_guess)
+    return {"p_correct": engine.predict_correct(p_mastery)}
