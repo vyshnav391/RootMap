@@ -1,0 +1,52 @@
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
+
+from db.database import get_db
+from models.student import Student
+from models.mastery import Mastery
+from schemas.student import StudentProfile, StudentUpdate, MasteryOut
+from middleware.auth import get_current_student
+
+router = APIRouter()
+
+
+@router.get("/me", response_model=StudentProfile)
+async def get_me(
+    current_student: Student = Depends(get_current_student),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Student)
+        .options(selectinload(Student.masteries))
+        .where(Student.id == current_student.id)
+    )
+    student = result.scalar_one()
+    return student
+
+
+@router.patch("/me", response_model=StudentProfile)
+async def update_me(
+    body: StudentUpdate,
+    current_student: Student = Depends(get_current_student),
+    db: AsyncSession = Depends(get_db),
+):
+    if body.full_name:
+        current_student.full_name = body.full_name
+    if body.grade_level:
+        current_student.grade_level = body.grade_level
+    await db.flush()
+    await db.refresh(current_student)
+    return current_student
+
+
+@router.get("/me/mastery", response_model=list[MasteryOut])
+async def get_mastery(
+    current_student: Student = Depends(get_current_student),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Mastery).where(Mastery.student_id == current_student.id)
+    )
+    return result.scalars().all()
