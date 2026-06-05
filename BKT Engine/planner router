@@ -1,0 +1,53 @@
+import httpx
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from db.database import get_db
+from models.student import Student
+from models.mastery import Mastery
+from schemas.planner import PlanRequest, StudyPlanOut
+from middleware.auth import get_current_student
+from config import settings
+
+router = APIRouter()
+
+
+@router.post("/generate", response_model=StudyPlanOut)
+async def generate_plan(
+    body: PlanRequest,
+    current_student: Student = Depends(get_current_student),
+    db: AsyncSession = Depends(get_db),
+):
+    # Fetch mastery data to include in plan request
+    result = await db.execute(
+        select(Mastery).where(Mastery.student_id == current_student.id)
+    )
+    masteries = result.scalars().all()
+    mastery_data = [
+        {"topic_id": m.topic_id, "p_mastery": m.p_mastery, "attempts": m.attempts}
+        for m in masteries
+    ]
+
+    payload = {
+        "student_id": str(body.student_id),
+        "goal": body.goal,
+        "available_hours_per_week": body.available_hours_per_week,
+        "target_topics": body.target_topics,
+        "weeks": body.weeks,
+        "mastery_data": mastery_data,
+        "student_name": current_student.full_name,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                f"{settings.planner_service_url}/planner/generate",
+                json=payload,
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Planner timed out")
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Planner service error: {e}")
