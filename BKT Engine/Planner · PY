@@ -1,0 +1,62 @@
+from pydantic import BaseModel
+from typing import List, Optional
+import uuid
+
+
+class PlanRequest(BaseModel):
+    student_id: uuid.UUID
+    goal: str
+    available_hours_per_week: float = 10.0
+    target_topics: Optional[List[str]] = None
+    weeks: int = 4
+
+
+class DayPlan(BaseModel):
+    day: str
+    topics: List[str]
+    duration_minutes: int
+    activities: List[str]
+
+
+class WeekPlan(BaseModel):
+    week_number: int
+    focus: str
+    days: List[DayPlan]
+    milestones: List[str]
+
+
+class StudyPlanOut(BaseModel):
+    student_id: uuid.UUID
+    goal: str
+    total_weeks: int
+    weeks: List[WeekPlan]
+    raw_plan: str
+
+
+class SessionCreate(BaseModel):
+    topic_id: str
+    question_id: Optional[str] = None
+    correct: Optional[int] = None
+    time_spent_seconds: Optional[int] = None
+    response_data: Optional[dict] = None
+
+
+class SessionOut(BaseModel):
+    id: uuid.UUID
+    student_id: uuid.UUID
+    topic_id: str
+    question_id: Optional[str]
+    correct: Optional[int]
+    time_spent_seconds: Optional[int]
+
+    class Config:
+        from_attributes = True
+
+
+class NextQuestionOut(BaseModel):
+    question_id: str
+    topic_id: str
+    difficulty: float
+    question_text: str
+    options: Optional[List[str]] = None
+    topic_name: str
