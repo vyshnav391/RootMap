@@ -1,0 +1,123 @@
+import httpx
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from db.database import get_db
+from models.student import Student
+from models.session import StudySession
+from models.mastery import Mastery
+from schemas.planner import SessionCreate, SessionOut, NextQuestionOut
+from middleware.auth import get_current_student
+from config import settings
+
+router = APIRouter()
+
+
+@router.post("/", response_model=SessionOut, status_code=201)
+async def create_session(
+    body: SessionCreate,
+    current_student: Student = Depends(get_current_student),
+    db: AsyncSession = Depends(get_db),
+):
+    session = StudySession(
+        student_id=current_student.id,
+        topic_id=body.topic_id,
+        question_id=body.question_id,
+        correct=body.correct,
+        time_spent_seconds=body.time_spent_seconds,
+        response_data=body.response_data,
+    )
+    db.add(session)
+    await db.flush()
+
+    # Trigger BKT update if answer provided
+    if body.correct is not None:
+        await _update_mastery(current_student.id, body.topic_id, body.correct, db)
+
+    await db.refresh(session)
+    return session
+
+
+async def _update_mastery(student_id, topic_id: str, correct: int, db: AsyncSession):
+    result = await db.execute(
+        select(Mastery).where(
+            Mastery.student_id == student_id,
+            Mastery.topic_id == topic_id,
+        )
+    )
+    mastery = result.scalar_one_or_none()
+    current_p = mastery.p_mastery if mastery else 0.1
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(
+                f"{settings.bkt_service_url}/bkt/update",
+                json={
+                    "p_mastery": current_p,
+                    "correct": correct,
+                    "p_transit": mastery.p_transit if mastery else 0.1,
+                    "p_slip": mastery.p_slip if mastery else 0.1,
+                    "p_guess": mastery.p_guess if mastery else 0.2,
+                },
+            )
+            resp.raise_for_status()
+            new_p = resp.json()["p_mastery"]
+    except Exception:
+        new_p = current_p  # fallback: keep old value
+
+    if mastery:
+        mastery.p_mastery = new_p
+        mastery.attempts += 1
+        mastery.correct_count += correct
+    else:
+        db.add(Mastery(
+            student_id=student_id,
+            topic_id=topic_id,
+            p_mastery=new_p,
+            attempts=1,
+            correct_count=correct,
+        ))
+    await db.flush()
+
+
+@router.get("/next-question", response_model=NextQuestionOut)
+async def get_next_question(
+    topic_id: str,
+    current_student: Student = Depends(get_current_student),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Mastery).where(
+            Mastery.student_id == current_student.id,
+            Mastery.topic_id == topic_id,
+        )
+    )
+    mastery = result.scalar_one_or_none()
+    p_mastery = mastery.p_mastery if mastery else 0.0
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(
+                f"{settings.selector_service_url}/selector/next",
+                params={"topic_id": topic_id, "p_mastery": p_mastery},
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Selector service unavailable: {e}")
+
+
+@router.get("/", response_model=list[SessionOut])
+async def list_sessions(
+    limit: int = 20,
+    current_student: Student = Depends(get_current_student),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(StudySession)
+        .where(StudySession.student_id == current_student.id)
+        .order_by(StudySession.created_at.desc())
+        .limit(limit)
+    )
+    return result.scalars().all()
