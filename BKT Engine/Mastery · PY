@@ -1,0 +1,22 @@
+from sqlalchemy import Column, String, Float, ForeignKey, DateTime, Integer, func
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
+import uuid
+from db.database import Base
+
+
+class Mastery(Base):
+    __tablename__ = "masteries"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    student_id = Column(UUID(as_uuid=True), ForeignKey("students.id"), nullable=False, index=True)
+    topic_id = Column(String, nullable=False, index=True)
+    p_mastery = Column(Float, default=0.0)   # P(L_t) — current mastery probability
+    p_transit = Column(Float, default=0.1)   # P(T)
+    p_slip = Column(Float, default=0.1)      # P(S)
+    p_guess = Column(Float, default=0.2)     # P(G)
+    attempts = Column(Integer, default=0)
+    correct_count = Column(Integer, default=0)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    student = relationship("Student", back_populates="masteries")
