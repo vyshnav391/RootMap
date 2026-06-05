@@ -1,0 +1,35 @@
+from pydantic import BaseModel, EmailStr
+from typing import Optional
+import uuid
+
+
+class StudentCreate(BaseModel):
+    email: EmailStr
+    password: str
+    full_name: str
+    grade_level: Optional[str] = None
+
+
+class StudentLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+class TokenData(BaseModel):
+    student_id: Optional[str] = None
+
+
+class StudentOut(BaseModel):
+    id: uuid.UUID
+    email: str
+    full_name: str
+    grade_level: Optional[str]
+    is_active: bool
+
+    class Config:
+        from_attributes = True
