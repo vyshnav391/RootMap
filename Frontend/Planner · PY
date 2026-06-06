@@ -1,0 +1,95 @@
+import json
+import logging
+from typing import List
+
+from llm_client import generate_plan
+from rag_pipeline import RAGPipeline
+from prompt_builder import build_system_prompt, build_user_prompt
+
+logger = logging.getLogger(__name__)
+
+
+class StudyPlanner:
+    def __init__(self, rag: RAGPipeline):
+        self.rag = rag
+
+    def _summarize_mastery(self, mastery_data: list[dict]) -> str:
+        if not mastery_data:
+            return "No mastery data available — assume beginner level for all topics."
+        lines = []
+        for m in sorted(mastery_data, key=lambda x: x["p_mastery"]):
+            pct = int(m["p_mastery"] * 100)
+            label = "🔴 Needs work" if pct < 40 else ("🟡 Developing" if pct < 75 else "🟢 Strong")
+            lines.append(f"  {m['topic_id']}: {pct}% {label} ({m.get('attempts', 0)} attempts)")
+        return "\n".join(lines)
+
+    async def generate(
+        self,
+        student_id: str,
+        student_name: str,
+        goal: str,
+        weeks: int,
+        hours_per_week: float,
+        mastery_data: list[dict],
+        target_topics: List[str] | None = None,
+    ) -> dict:
+        mastery_summary = self._summarize_mastery(mastery_data)
+
+        # RAG retrieval
+        rag_query = f"Study plan for: {goal}. Topics: {target_topics or 'general'}"
+        curriculum_context = await self.rag.retrieve(rag_query)
+
+        system = build_system_prompt()
+        user = build_user_prompt(
+            student_name=student_name,
+            goal=goal,
+            weeks=weeks,
+            hours_per_week=hours_per_week,
+            mastery_summary=mastery_summary,
+            curriculum_context=curriculum_context,
+            target_topics=target_topics,
+        )
+
+        raw_response = await generate_plan(system, user)
+
+        try:
+            plan = json.loads(raw_response)
+        except json.JSONDecodeError:
+            # Attempt to extract JSON from response
+            import re
+            match = re.search(r"\{.*\}", raw_response, re.DOTALL)
+            if match:
+                plan = json.loads(match.group())
+            else:
+                logger.error("Failed to parse planner response as JSON")
+                plan = self._fallback_plan(student_id, goal, weeks, mastery_data)
+
+        plan["student_id"] = student_id
+        plan["raw_plan"] = plan.get("raw_plan", raw_response[:500])
+        return plan
+
+    def _fallback_plan(self, student_id, goal, weeks, mastery_data) -> dict:
+        """Emergency fallback if LLM returns bad JSON."""
+        return {
+            "student_id": student_id,
+            "goal": goal,
+            "total_weeks": weeks,
+            "weeks": [
+                {
+                    "week_number": i + 1,
+                    "focus": f"Week {i + 1} study",
+                    "days": [
+                        {
+                            "day": day,
+                            "topics": [],
+                            "duration_minutes": 60,
+                            "activities": ["Review notes", "Practice problems"],
+                        }
+                        for day in ["Monday", "Wednesday", "Friday"]
+                    ],
+                    "milestones": [f"Complete week {i + 1} goals"],
+                }
+                for i in range(weeks)
+            ],
+            "raw_plan": "Plan generation encountered an error. Please try again.",
+        }
