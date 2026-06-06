@@ -1,0 +1,39 @@
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+from typing import List, Optional
+
+from planner import StudyPlanner
+from rag_pipeline import RAGPipeline
+from vector_store import VectorStore
+from config import settings
+
+router = APIRouter(prefix="/planner")
+
+_vector_store = VectorStore(settings.data_dir)
+_vector_store.load()
+_rag = RAGPipeline(_vector_store)
+_planner = StudyPlanner(_rag)
+
+
+class PlanRequest(BaseModel):
+    student_id: str
+    student_name: str
+    goal: str
+    available_hours_per_week: float = 10.0
+    weeks: int = 4
+    target_topics: Optional[List[str]] = None
+    mastery_data: List[dict] = []
+
+
+@router.post("/generate")
+async def generate_plan(body: PlanRequest):
+    plan = await _planner.generate(
+        student_id=body.student_id,
+        student_name=body.student_name,
+        goal=body.goal,
+        weeks=body.weeks,
+        hours_per_week=body.available_hours_per_week,
+        mastery_data=body.mastery_data,
+        target_topics=body.target_topics,
+    )
+    return plan
