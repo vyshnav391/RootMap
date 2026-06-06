@@ -1,0 +1,41 @@
+"""
+RAG Pipeline: retrieve relevant curriculum context before calling Claude.
+"""
+import logging
+from typing import List
+from vector_store import VectorStore
+
+logger = logging.getLogger(__name__)
+
+_FALLBACK_CONTEXT = """
+General study strategies:
+- Spaced repetition is highly effective for long-term retention.
+- Interleaving different topics within a study session improves learning.
+- Active recall (testing yourself) outperforms passive re-reading.
+- The Pomodoro technique (25 min focus, 5 min break) helps maintain concentration.
+- Teaching a concept to yourself (Feynman technique) reveals gaps.
+"""
+
+
+class RAGPipeline:
+    def __init__(self, vector_store: VectorStore):
+        self.vector_store = vector_store
+        self._embed_fn = None
+
+    def set_embed_fn(self, fn):
+        """Inject embedding function (from OpenAI or local model)."""
+        self._embed_fn = fn
+
+    async def retrieve(self, query: str, top_k: int = 5) -> str:
+        if self._embed_fn is None or not self.vector_store._loaded:
+            return _FALLBACK_CONTEXT
+
+        try:
+            embedding = await self._embed_fn(query)
+            chunks = self.vector_store.search(embedding, top_k=top_k)
+            if not chunks:
+                return _FALLBACK_CONTEXT
+            return "\n\n".join(chunks)
+        except Exception as e:
+            logger.warning(f"RAG retrieval failed: {e}. Using fallback.")
+            return _FALLBACK_CONTEXT
