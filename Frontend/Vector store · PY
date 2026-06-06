@@ -1,0 +1,47 @@
+"""
+Simple vector store backed by numpy + cosine similarity.
+Loads curriculum embeddings from /data/embeddings/.
+Falls back gracefully if embeddings not available.
+"""
+import os
+import json
+import pickle
+import logging
+import numpy as np
+from typing import List
+
+logger = logging.getLogger(__name__)
+
+
+class VectorStore:
+    def __init__(self, data_dir: str):
+        self.data_dir = data_dir
+        self.embeddings: np.ndarray | None = None
+        self.documents: list[dict] = []
+        self._loaded = False
+
+    def load(self):
+        emb_path = os.path.join(self.data_dir, "embeddings", "curriculum_embeddings.pkl")
+        docs_path = os.path.join(self.data_dir, "embeddings", "curriculum_docs.json")
+        try:
+            with open(emb_path, "rb") as f:
+                self.embeddings = pickle.load(f)
+            with open(docs_path, "r") as f:
+                self.documents = json.load(f)
+            self._loaded = True
+            logger.info(f"Loaded {len(self.documents)} curriculum documents into vector store.")
+        except FileNotFoundError:
+            logger.warning("Embeddings not found — RAG will use fallback context.")
+
+    def search(self, query_embedding: np.ndarray, top_k: int = 5) -> list[str]:
+        if not self._loaded or self.embeddings is None or len(self.documents) == 0:
+            return []
+
+        # Cosine similarity
+        query_norm = query_embedding / (np.linalg.norm(query_embedding) + 1e-10)
+        emb_norms = self.embeddings / (
+            np.linalg.norm(self.embeddings, axis=1, keepdims=True) + 1e-10
+        )
+        scores = emb_norms @ query_norm
+        top_indices = np.argsort(scores)[::-1][:top_k]
+        return [self.documents[i]["text"] for i in top_indices]
