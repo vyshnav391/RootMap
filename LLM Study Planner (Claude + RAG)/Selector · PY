@@ -1,0 +1,60 @@
+"""
+Adaptive Question Selector
+
+Strategy:
+1. If p_mastery < 0.3 → pick easy questions (difficulty 0.1–0.4)
+2. If 0.3 <= p_mastery < 0.7 → pick medium questions (difficulty 0.3–0.7)  [Zone of Proximal Development]
+3. If p_mastery >= 0.7 → pick hard questions (difficulty 0.6–1.0)
+4. Prefer questions not recently seen (recency penalty)
+"""
+import random
+from graph_client import GraphClient
+
+
+class AdaptiveSelector:
+    DIFFICULTY_BANDS = {
+        "easy":   (0.0, 0.4),
+        "medium": (0.3, 0.7),
+        "hard":   (0.6, 1.0),
+    }
+
+    def _get_band(self, p_mastery: float) -> tuple[float, float]:
+        if p_mastery < 0.3:
+            return self.DIFFICULTY_BANDS["easy"]
+        elif p_mastery < 0.7:
+            return self.DIFFICULTY_BANDS["medium"]
+        else:
+            return self.DIFFICULTY_BANDS["hard"]
+
+    async def select_next(
+        self,
+        graph: GraphClient,
+        topic_id: str,
+        p_mastery: float,
+        seen_question_ids: list[str] | None = None,
+    ) -> dict | None:
+        seen = set(seen_question_ids or [])
+        min_diff, max_diff = self._get_band(p_mastery)
+
+        questions = await graph.get_questions_for_topic(
+            topic_id, min_diff=min_diff, max_diff=max_diff, limit=20
+        )
+
+        if not questions:
+            # Fallback: get any question for this topic
+            questions = await graph.get_questions_for_topic(topic_id, limit=20)
+
+        if not questions:
+            return None
+
+        # Filter out recently seen
+        unseen = [q for q in questions if q["id"] not in seen]
+        pool = unseen if unseen else questions
+
+        # Weighted random: prefer questions closer to target difficulty
+        target = (min_diff + max_diff) / 2
+        weights = [1 / (abs(q["difficulty"] - target) + 0.1) for q in pool]
+        total = sum(weights)
+        weights = [w / total for w in weights]
+
+        return random.choices(pool, weights=weights, k=1)[0]
