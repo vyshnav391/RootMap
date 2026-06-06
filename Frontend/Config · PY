@@ -1,0 +1,16 @@
+from pydantic_settings import BaseSettings
+
+
+class Settings(BaseSettings):
+    anthropic_api_key: str = ""
+    database_url: str = "postgresql+asyncpg://rootmap:rootmap@postgres:5432/rootmap"
+    openai_api_key: str = ""  # for embeddings
+    embedding_model: str = "text-embedding-3-small"
+    data_dir: str = "/data"
+
+    class Config:
+        env_file = ".env"
+        extra = "ignore"
+
+
+settings = Settings()
