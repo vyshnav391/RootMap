@@ -1,0 +1,58 @@
+from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional
+
+from graph_client import GraphClient, get_driver
+from selector import AdaptiveSelector
+
+router = APIRouter(prefix="/selector")
+_selector = AdaptiveSelector()
+
+
+async def get_graph():
+    driver = await get_driver()
+    return GraphClient(driver)
+
+
+@router.get("/next")
+async def get_next_question(
+    topic_id: str,
+    p_mastery: float = 0.0,
+    seen: Optional[str] = None,  # comma-separated question IDs
+    graph: GraphClient = Depends(get_graph),
+):
+    seen_ids = seen.split(",") if seen else []
+    question = await _selector.select_next(graph, topic_id, p_mastery, seen_ids)
+
+    if not question:
+        raise HTTPException(status_code=404, detail=f"No questions found for topic {topic_id}")
+
+    topic = await graph.get_topic(topic_id)
+    return {
+        "question_id": question["id"],
+        "topic_id": topic_id,
+        "topic_name": topic["name"] if topic else topic_id,
+        "difficulty": question["difficulty"],
+        "question_text": question["text"],
+        "options": question.get("options"),
+    }
+
+
+@router.get("/topics")
+async def list_topics(
+    subject: Optional[str] = None,
+    graph: GraphClient = Depends(get_graph),
+):
+    return await graph.get_all_topics(subject)
+
+
+@router.get("/topics/{topic_id}/prerequisites")
+async def get_prerequisites(topic_id: str, graph: GraphClient = Depends(get_graph)):
+    return await graph.get_prerequisites(topic_id)
+
+
+@router.get("/topics/{topic_id}")
+async def get_topic(topic_id: str, graph: GraphClient = Depends(get_graph)):
+    topic = await graph.get_topic(topic_id)
+    if not topic:
+        raise HTTPException(status_code=404, detail="Topic not found")
+    return topic
